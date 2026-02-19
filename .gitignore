@@ -1,0 +1,18 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Zencoder/Zenflow
+.zencoder/
+.zenflow/
+
+# Maven target in subdirectories is handled by car-rental/.gitignore

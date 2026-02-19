@@ -1,0 +1,49 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: car-rental-backend
+  
+  # 1. CONFIGURATION R2DBC
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5433/stilles_auto
+    username: postgres
+    password: 18151995
+  
+  sql:
+    init:
+      mode: never
+
+  # 2. CONFIGURATION FLYWAY
+  flyway:
+    enabled: true
+    url: jdbc:postgresql://localhost:5433/stilles_auto
+    user: postgres
+    password: 18151995
+    locations: classpath:db/migration
+
+  # 3. CONFIGURATION MAIL (Bien rangé sous spring)
+  mail:
+    host: smtp.gmail.com
+    port: 587
+    username: hendrixpenka2@gmail.com
+    password: "qsuw ilbo haee nhwl" # Garde les guillemets pour les espaces
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+# 4. CONFIGURATION JWT (À la RACINE, au même niveau que spring:)
+jwt:
+  secret: "my-super-secret-key-at-least-32-chars!!"
+  access-expiration: 900000   # 15 min
+  refresh-expiration: 604800000  # 7 jours
+
+logging:
+  level:
+    org.springframework: INFO
+    org.flywaydb: INFO
+    com.Team-Pk: DEBUG
