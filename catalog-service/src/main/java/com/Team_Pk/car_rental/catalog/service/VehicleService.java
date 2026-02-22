@@ -5,12 +5,15 @@ import com.Team_Pk.car_rental.catalog.dto.AvailabilityResponse;
 import com.Team_Pk.car_rental.catalog.dto.BlockPeriodRequest;
 import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
+import com.Team_Pk.car_rental.catalog.dto.VehicleCalendarResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleDetailResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleSearchCriteria;
+import com.Team_Pk.car_rental.catalog.entity.StockMovement;
 import com.Team_Pk.car_rental.catalog.entity.Vehicle;
 import com.Team_Pk.car_rental.catalog.entity.VehicleImage;
 import com.Team_Pk.car_rental.catalog.entity.enums.VehicleStatus;
 import com.Team_Pk.car_rental.catalog.repository.RentalAvailabilityRepository;
+import com.Team_Pk.car_rental.catalog.repository.StockMovementRepository;
 import com.Team_Pk.car_rental.catalog.repository.VehicleImageRepository;
 import com.Team_Pk.car_rental.catalog.repository.VehicleRepository;
 import com.Team_Pk.car_rental.catalog.dto.VehicleRequest;
@@ -21,6 +24,7 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -31,6 +35,7 @@ public class VehicleService {
     private final VehicleRepository vehicleRepository;
     private final VehicleImageRepository imageRepository;
     private final RentalAvailabilityRepository availabilityRepository;
+    private final StockMovementRepository stockMovementRepository;
     
 
     // ==========================================
@@ -240,9 +245,63 @@ public class VehicleService {
     // DISPONIBILITÉS (CALENDRIER)
     // ==========================================
 
-    // PUBLIC : Voir les dates bloquées
-    public Flux<AvailabilityResponse> getVehicleAvailability(UUID vehicleId) {
-        return availabilityRepository.getFutureAvailability(vehicleId);
+// ==========================================
+    // MISE À JOUR : CALCUL DU CALENDRIER
+    // ==========================================
+
+    public Mono<VehicleCalendarResponse> getVehicleAvailability(UUID vehicleId, LocalDate from, LocalDate to) {
+        // Par défaut, on prend le mois en cours si from/to sont null
+        LocalDate start = (from != null) ? from : LocalDate.now().withDayOfMonth(1);
+        LocalDate end = (to != null) ? to : start.plusMonths(1).withDayOfMonth(start.plusMonths(1).lengthOfMonth());
+
+        return vehicleRepository.findById(vehicleId)
+                .flatMap(vehicle -> 
+                    availabilityRepository.getFutureAvailability(vehicleId)
+                        .collectList()
+                        .map(blocked -> {
+                            // Ici on calcule les trous (périodes libres)
+                            List<VehicleCalendarResponse.Period> available = calculateAvailablePeriods(start, end, blocked);
+                            
+                            return VehicleCalendarResponse.builder()
+                                    .vehicleId(vehicle.getId())
+                                    .rentalPricePerDay(vehicle.getRentalPricePerDay())
+                                    .blockedPeriods(blocked)
+                                    .availablePeriods(available)
+                                    .build();
+                        })
+                );
+    }
+
+    // Algorithme simple pour trouver les trous
+    private List<VehicleCalendarResponse.Period> calculateAvailablePeriods(LocalDate start, LocalDate end, List<AvailabilityResponse> blocked) {
+        List<VehicleCalendarResponse.Period> available = new java.util.ArrayList<>();
+        LocalDate current = start;
+
+        // On trie les blocages par date
+        blocked.sort((a, b) -> a.getStartDate().compareTo(b.getStartDate()));
+
+        for (AvailabilityResponse block : blocked) {
+            // Si le blocage commence après notre curseur, il y a un trou (donc dispo !)
+            if (block.getStartDate().isAfter(current)) {
+                available.add(VehicleCalendarResponse.Period.builder()
+                        .start(current)
+                        .end(block.getStartDate().minusDays(1))
+                        .build());
+            }
+            // On avance le curseur après le blocage
+            if (block.getEndDate().isAfter(current)) {
+                current = block.getEndDate().plusDays(1);
+            }
+        }
+
+        // S'il reste du temps après le dernier blocage jusqu'à la fin demandée
+        if (current.isBefore(end) || current.equals(end)) {
+            available.add(VehicleCalendarResponse.Period.builder()
+                    .start(current)
+                    .end(end)
+                    .build());
+        }
+        return available;
     }
 
     // ADMIN : Bloquer manuellement (ex: La voiture va au garage)
@@ -260,5 +319,15 @@ public class VehicleService {
     // ADMIN : Débloquer
     public Mono<Void> unblockVehiclePeriod(UUID vehicleId, UUID blockId) {
         return availabilityRepository.deleteBlock(blockId, vehicleId);
+    }
+
+    // ==========================================
+    // STOCK
+    // ==========================================
+
+    public Flux<StockMovement> getVehicleStockHistory(UUID vehicleId) {
+        return vehicleRepository.findById(vehicleId)
+                .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")))
+                .thenMany(stockMovementRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("VEHICLE", vehicleId));
     }
 }

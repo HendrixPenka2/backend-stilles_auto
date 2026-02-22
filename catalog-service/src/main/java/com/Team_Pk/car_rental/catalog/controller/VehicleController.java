@@ -1,13 +1,14 @@
 package com.Team_Pk.car_rental.catalog.controller;
 
-import com.Team_Pk.car_rental.catalog.dto.AvailabilityResponse;
 import com.Team_Pk.car_rental.catalog.dto.BlockPeriodRequest;
 import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
 import com.Team_Pk.car_rental.catalog.dto.ImageReorderRequest;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
+import com.Team_Pk.car_rental.catalog.dto.VehicleCalendarResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleDetailResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleRequest;
 import com.Team_Pk.car_rental.catalog.dto.VehicleSearchCriteria;
+import com.Team_Pk.car_rental.catalog.entity.StockMovement;
 import com.Team_Pk.car_rental.catalog.entity.Vehicle;
 import com.Team_Pk.car_rental.catalog.entity.VehicleImage;
 import com.Team_Pk.car_rental.catalog.service.VehicleImageService;
@@ -25,6 +26,7 @@ import org.springdoc.core.annotations.ParameterObject;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 
@@ -63,10 +65,12 @@ public class VehicleController {
         return vehicleService.getFilterOptions();
     }
 
-    // --- ROUTE PUBLIQUE (Pour le calendrier côté Front-end) ---
     @GetMapping("/vehicles/{id}/availability")
-    public Flux<AvailabilityResponse> getAvailability(@PathVariable("id") UUID id) {
-        return vehicleService.getVehicleAvailability(id);
+    public Mono<VehicleCalendarResponse> getAvailability(
+            @PathVariable("id") UUID id,
+            @RequestParam(name = "from", required = false) LocalDate from, // Ajoute 'name'
+            @RequestParam(name = "to", required = false) LocalDate to) {   // Ajoute 'name'
+        return vehicleService.getVehicleAvailability(id, from, to);
     }
 
 
@@ -155,6 +159,12 @@ public class VehicleController {
             @PathVariable("id") UUID vehicleId,
             @RequestBody ImageReorderRequest request) {
         return vehicleImageService.reorderImages(vehicleId, request);
+    }
+
+    @GetMapping("/admin/vehicles/{id}/stock-history")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Flux<StockMovement> getVehicleStockHistory(@PathVariable("id") UUID id) {
+        return vehicleService.getVehicleStockHistory(id);
     }
 
 }
