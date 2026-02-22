@@ -19,7 +19,6 @@ import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentResponse;
 import com.Team_Pk.car_rental.catalog.dto.StockHistoryListResponse;
 import com.Team_Pk.car_rental.catalog.entity.Accessory;
 import com.Team_Pk.car_rental.catalog.entity.AccessoryImage;
-import com.Team_Pk.car_rental.catalog.entity.StockMovement;
 import com.Team_Pk.car_rental.catalog.service.AccessoryImageService;
 import com.Team_Pk.car_rental.catalog.service.AccessoryService;
 
