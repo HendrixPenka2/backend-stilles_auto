@@ -7,6 +7,7 @@ import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
 import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentRequest;
 import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentResponse;
+import com.Team_Pk.car_rental.catalog.dto.StockHistoryListResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleCalendarResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleDetailResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleSearchCriteria;
@@ -24,7 +25,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
@@ -176,10 +176,35 @@ public class VehicleService {
                 });
     }
 
-    public Mono<Vehicle> updateVehicle(UUID id, VehicleRequest req) {
+@Transactional
+    public Mono<Vehicle> updateVehicle(UUID id, VehicleRequest req, UUID adminId) {
         return vehicleRepository.findById(id)
                 .flatMap(vehicle -> {
-                    // On met à jour TOUS les champs fournis (Patch partiel)
+                    // 1. Détection de changement de stock
+                    Mono<Void> stockAuditMono = Mono.empty();
+                    
+                    if (req.getStockQuantity() != null && !req.getStockQuantity().equals(vehicle.getStockQuantity())) {
+                        int diff = req.getStockQuantity() - vehicle.getStockQuantity();
+                        
+                        StockMovement movement = StockMovement.builder()
+                                .entityType("VEHICLE")
+                                .entityId(vehicle.getId())
+                                .quantityDelta(diff)
+                                .quantityBefore(vehicle.getStockQuantity())
+                                .quantityAfter(req.getStockQuantity())
+                                .reason(StockMovementReason.ADJUSTMENT) // Ajustement manuel
+                                .notes("Modification via la fiche produit")
+                                .performedBy(adminId) // <-- ON UTILISE LE VRAI ADMIN ICI
+                                .createdAt(Instant.now())
+                                .build();
+                        
+                        stockAuditMono = stockMovementRepository.save(movement).then();
+                        
+                        // Mise à jour de l'objet
+                        vehicle.setStockQuantity(req.getStockQuantity());
+                    }
+
+                    // 2. Mise à jour de TOUS les autres champs
                     if (req.getTitle() != null) vehicle.setTitle(req.getTitle());
                     if (req.getBrand() != null) vehicle.setBrand(req.getBrand());
                     if (req.getModel() != null) vehicle.setModel(req.getModel());
@@ -197,14 +222,15 @@ public class VehicleService {
                     if (req.getListingMode() != null) vehicle.setListingMode(req.getListingMode());
                     if (req.getSalePrice() != null) vehicle.setSalePrice(req.getSalePrice());
                     if (req.getRentalPricePerDay() != null) vehicle.setRentalPricePerDay(req.getRentalPricePerDay());
-                    if (req.getStockQuantity() != null) vehicle.setStockQuantity(req.getStockQuantity());
                     if (req.getStatus() != null) vehicle.setStatus(req.getStatus());
                     if (req.getDescription() != null) vehicle.setDescription(req.getDescription());
                     if (req.getFeatures() != null) vehicle.setFeatures(req.getFeatures());
                     if (req.getIsFeatured() != null) vehicle.setIsFeatured(req.getIsFeatured());
-                    
+
                     vehicle.setUpdatedAt(Instant.now());
-                    return vehicleRepository.save(vehicle);
+
+                    // 3. Sauvegarde du mouvement (si existant) PUIS du véhicule
+                    return stockAuditMono.then(vehicleRepository.save(vehicle));
                 })
                 .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")));
     }
@@ -423,9 +449,18 @@ public class VehicleService {
     // STOCK
     // ==========================================
 
-    public Flux<StockMovement> getVehicleStockHistory(UUID vehicleId) {
+// 2. Récupérer l'historique complet (DTO enrichi)
+    public Mono<StockHistoryListResponse> getVehicleStockHistory(UUID vehicleId) {
         return vehicleRepository.findById(vehicleId)
                 .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")))
-                .thenMany(stockMovementRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("VEHICLE", vehicleId));
+                .flatMap(vehicle -> 
+                    stockMovementRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("VEHICLE", vehicleId)
+                        .collectList() // Transforme le Flux en List
+                        .map(movements -> StockHistoryListResponse.builder()
+                                .entityId(vehicle.getId())
+                                .currentStock(vehicle.getStockQuantity())
+                                .movements(movements)
+                                .build())
+                );
     }
 }

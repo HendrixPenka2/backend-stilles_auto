@@ -16,6 +16,7 @@ import com.Team_Pk.car_rental.catalog.dto.ImageReorderRequest;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
 import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentRequest;
 import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentResponse;
+import com.Team_Pk.car_rental.catalog.dto.StockHistoryListResponse;
 import com.Team_Pk.car_rental.catalog.entity.Accessory;
 import com.Team_Pk.car_rental.catalog.entity.AccessoryImage;
 import com.Team_Pk.car_rental.catalog.entity.StockMovement;
@@ -66,17 +67,22 @@ public class AccessoryController {
     }
 
     @PatchMapping("/admin/accessories/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public Mono<Accessory> update(@PathVariable("id") UUID id, @RequestBody AccessoryRequest req) {
-        return accessoryService.updateAccessory(id, req);
-    }
-
-@DeleteMapping("/admin/accessories/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public Mono<Void> delete(@PathVariable("id") UUID id, Authentication auth) {
-        UUID adminId = UUID.fromString(auth.getName());
-        return accessoryService.deleteAccessory(id, adminId);
-    }
+        @PreAuthorize("hasRole('ADMIN')")
+        public Mono<Accessory> update(
+                @PathVariable("id") UUID id, 
+                @RequestBody AccessoryRequest req, 
+                Authentication auth) { // <-- L'objet Authentication est ajouté ici
+                
+            // Extraction de l'ID Admin depuis le JWT
+            UUID adminId = UUID.fromString(auth.getName());
+            return accessoryService.updateAccessory(id, req, adminId);
+        }
+    @DeleteMapping("/admin/accessories/{id}")
+        @PreAuthorize("hasRole('ADMIN')")
+        public Mono<Void> delete(@PathVariable("id") UUID id, Authentication auth) {
+            UUID adminId = UUID.fromString(auth.getName());
+            return accessoryService.deleteAccessory(id, adminId);
+        }
 
     // --- ADMIN IMAGES ---
     @PostMapping(value = "/admin/accessories/{id}/images", consumes = "multipart/form-data")
@@ -106,7 +112,7 @@ public class AccessoryController {
 
     @GetMapping("/admin/accessories/{id}/stock-history")
     @PreAuthorize("hasRole('ADMIN')")
-    public Flux<StockMovement> getHistory(@PathVariable("id") UUID id) {
+    public Mono<StockHistoryListResponse> getHistory(@PathVariable("id") UUID id) { // <-- Changé ici (Mono au lieu de Flux)
         return accessoryService.getStockHistory(id);
     }
     

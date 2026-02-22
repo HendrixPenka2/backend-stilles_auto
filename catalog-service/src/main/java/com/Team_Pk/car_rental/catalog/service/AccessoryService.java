@@ -11,6 +11,7 @@ import com.Team_Pk.car_rental.catalog.dto.AccessorySearchCriteria;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
 import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentRequest;
 import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentResponse;
+import com.Team_Pk.car_rental.catalog.dto.StockHistoryListResponse;
 import com.Team_Pk.car_rental.catalog.entity.Accessory;
 import com.Team_Pk.car_rental.catalog.entity.StockMovement;
 import com.Team_Pk.car_rental.catalog.entity.enums.StockMovementReason;
@@ -120,16 +121,58 @@ public class AccessoryService {
     
 
 
-    public Mono<Accessory> updateAccessory(UUID id, AccessoryRequest req) {
+@Transactional
+    public Mono<Accessory> updateAccessory(UUID id, AccessoryRequest req, UUID adminId) {
         return accessoryRepository.findById(id)
                 .flatMap(acc -> {
+                    // 1. Détection de changement de stock
+                    Mono<Void> stockAuditMono = Mono.empty();
+
+                    if (req.getStockQuantity() != null && !req.getStockQuantity().equals(acc.getStockQuantity())) {
+                        int diff = req.getStockQuantity() - acc.getStockQuantity();
+
+                        StockMovement movement = StockMovement.builder()
+                                .entityType("ACCESSORY")
+                                .entityId(acc.getId())
+                                .quantityDelta(diff)
+                                .quantityBefore(acc.getStockQuantity())
+                                .quantityAfter(req.getStockQuantity())
+                                .reason(StockMovementReason.ADJUSTMENT)
+                                .notes("Modification via la fiche produit")
+                                .performedBy(adminId) // <-- ON UTILISE LE VRAI ADMIN ICI
+                                .createdAt(Instant.now())
+                                .build();
+
+                        stockAuditMono = stockMovementRepository.save(movement).then();
+                        
+                        acc.setStockQuantity(req.getStockQuantity());
+                    }
+
+                    // 2. Mise à jour des autres champs
                     if (req.getName() != null) acc.setName(req.getName());
+                    if (req.getBrand() != null) acc.setBrand(req.getBrand());
+                    if (req.getSku() != null) acc.setSku(req.getSku());
+                    if (req.getCategory() != null) acc.setCategory(req.getCategory());
+                    if (req.getSubCategory() != null) acc.setSubCategory(req.getSubCategory());
+                    if (req.getCompatibleBrands() != null) acc.setCompatibleBrands(req.getCompatibleBrands());
+                    if (req.getCompatibleModels() != null) acc.setCompatibleModels(req.getCompatibleModels());
                     if (req.getPrice() != null) acc.setPrice(req.getPrice());
+                    if (req.getComparePrice() != null) acc.setComparePrice(req.getComparePrice());
+                    if (req.getLowStockAlert() != null) acc.setLowStockAlert(req.getLowStockAlert());
+                    if (req.getCondition() != null) acc.setCondition(req.getCondition());
+                    if (req.getWeightKg() != null) acc.setWeightKg(req.getWeightKg());
+                    if (req.getDimensions() != null) acc.setDimensions(req.getDimensions());
+                    if (req.getDescription() != null) acc.setDescription(req.getDescription());
+                    if (req.getSpecifications() != null) acc.setSpecifications(req.getSpecifications());
+                    if (req.getIsFeatured() != null) acc.setIsFeatured(req.getIsFeatured());
                     if (req.getIsActive() != null) acc.setIsActive(req.getIsActive());
-                    // ... mapper les autres champs ...
+
                     acc.setUpdatedAt(Instant.now());
-                    return accessoryRepository.save(acc);
-                });
+
+                    // 3. Sauvegarde du mouvement (si existant) PUIS de l'accessoire
+                    return stockAuditMono.then(accessoryRepository.save(acc));
+                })
+                .switchIfEmpty(Mono.error(new RuntimeException("Accessoire introuvable")));
     }
 
     // ==============================================================
@@ -205,7 +248,20 @@ public class AccessoryService {
                 });
     }
 
-    public Flux<StockMovement> getStockHistory(UUID id) {
-        return stockMovementRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("ACCESSORY", id);
+// ==========================================
+    // HISTORIQUE DE STOCK (DTO ENRICHI)
+    // ==========================================
+    public Mono<StockHistoryListResponse> getStockHistory(UUID accessoryId) {
+        return accessoryRepository.findById(accessoryId)
+                .switchIfEmpty(Mono.error(new RuntimeException("Accessoire introuvable")))
+                .flatMap(acc -> 
+                    stockMovementRepository.findByEntityTypeAndEntityIdOrderByCreatedAtDesc("ACCESSORY", accessoryId)
+                        .collectList() // Transforme le Flux en List
+                        .map(movements -> StockHistoryListResponse.builder()
+                                .entityId(acc.getId())
+                                .currentStock(acc.getStockQuantity()) // On ajoute le stock actuel
+                                .movements(movements) // On ajoute la liste des mouvements
+                                .build())
+                );
     }
 }

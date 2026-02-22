@@ -4,11 +4,13 @@ import com.Team_Pk.car_rental.catalog.dto.BlockPeriodRequest;
 import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
 import com.Team_Pk.car_rental.catalog.dto.ImageReorderRequest;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
+import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentRequest;
+import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentResponse;
+import com.Team_Pk.car_rental.catalog.dto.StockHistoryListResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleCalendarResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleDetailResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleRequest;
 import com.Team_Pk.car_rental.catalog.dto.VehicleSearchCriteria;
-import com.Team_Pk.car_rental.catalog.entity.StockMovement;
 import com.Team_Pk.car_rental.catalog.entity.Vehicle;
 import com.Team_Pk.car_rental.catalog.entity.VehicleImage;
 import com.Team_Pk.car_rental.catalog.service.VehicleImageService;
@@ -87,23 +89,28 @@ public class VehicleController {
         return vehicleService.createVehicle(request, adminId);
     }
 
-    @PatchMapping("/admin/vehicles/{id}") // Utilisation de l'annotation Spring
-    @PreAuthorize("hasRole('ADMIN')")
-    // CORRECTION 2 : Préciser ("id") dans le PathVariable
-    public Mono<Vehicle> updateVehicle(@PathVariable("id") UUID id, @RequestBody VehicleRequest request) {
-        return vehicleService.updateVehicle(id, request);
-    }
+    @PatchMapping("/admin/vehicles/{id}")
+        @PreAuthorize("hasRole('ADMIN')")
+        public Mono<Vehicle> updateVehicle(
+                @PathVariable("id") UUID id, 
+                @RequestBody VehicleRequest request, 
+                Authentication auth) { // <-- L'objet Authentication est ajouté ici
+                
+            // Extraction de l'ID Admin depuis le JWT
+            UUID adminId = UUID.fromString(auth.getName());
+            return vehicleService.updateVehicle(id, request, adminId);
+        }
 
-@DeleteMapping("/admin/vehicles/{id}")
-    @PreAuthorize("hasRole('ADMIN')")
-    public Mono<Void> deleteVehicle(@PathVariable("id") UUID id, Authentication auth) {
-        UUID adminId = UUID.fromString(auth.getName());
-        return vehicleService.deleteVehicle(id, adminId); // On passe l'adminId
-    }
+    @DeleteMapping("/admin/vehicles/{id}")
+        @PreAuthorize("hasRole('ADMIN')")
+        public Mono<Void> deleteVehicle(@PathVariable("id") UUID id, Authentication auth) {
+            UUID adminId = UUID.fromString(auth.getName());
+            return vehicleService.deleteVehicle(id, adminId); // On passe l'adminId
+        }
 
     @PatchMapping("/admin/vehicles/{id}/reactivate")
     @PreAuthorize("hasRole('ADMIN')")
-    public Mono<Vehicle> reactivateVehicle(@PathVariable("id") UUID id) {
+    public Mono<Vehicle> reactivateVehicle(@PathVariable("id") UUID id, Authentication auth) {
         return vehicleService.reactivateVehicle(id);
     }
 
@@ -161,9 +168,30 @@ public class VehicleController {
         return vehicleImageService.reorderImages(vehicleId, request);
     }
 
+    // @GetMapping("/admin/vehicles/{id}/stock-history")
+    // @PreAuthorize("hasRole('ADMIN')")
+    // public Flux<StockMovement> getVehicleStockHistory(@PathVariable("id") UUID id) {
+    //     return vehicleService.getVehicleStockHistory(id);
+    // }
+
+    // ==========================================
+    // GESTION DU STOCK ADMIN (VÉHICULES)
+    // ==========================================
+
+    @PatchMapping("/admin/vehicles/{id}/stock")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<StockAdjustmentResponse> adjustVehicleStock(
+            @PathVariable("id") UUID id, 
+            @RequestBody StockAdjustmentRequest req, 
+            Authentication auth) {
+        // On récupère l'ID de l'admin
+        UUID adminId = UUID.fromString(auth.getName());
+        return vehicleService.adjustVehicleStock(id, req, adminId);
+    }
+
     @GetMapping("/admin/vehicles/{id}/stock-history")
     @PreAuthorize("hasRole('ADMIN')")
-    public Flux<StockMovement> getVehicleStockHistory(@PathVariable("id") UUID id) {
+    public Mono<StockHistoryListResponse> getStockHistory(@PathVariable("id") UUID id) {
         return vehicleService.getVehicleStockHistory(id);
     }
 
