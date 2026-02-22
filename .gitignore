@@ -15,4 +15,5 @@ Thumbs.db
 .zencoder/
 .zenflow/
 
-# Maven target in subdirectories is handled by car-rental/.gitignore
+# Maven target directories handled by each microservice's .gitignore
+*/target/

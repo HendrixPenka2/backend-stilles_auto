@@ -1,0 +1,42 @@
+server:
+  port: 8081  # Port différent de Auth (8080)
+
+spring:
+  application:
+    name: catalog-service
+  
+  # Base de données (Même serveur, mais schéma 'catalog')
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5433/stilles_auto
+    username: postgres
+    password: 18151995
+  
+  # Migration SQL (Isole les tables dans le schéma catalog)
+  flyway:
+    enabled: true
+    url: jdbc:postgresql://localhost:5433/stilles_auto
+    user: postgres
+    password: 18151995
+    locations: classpath:db/migration
+    schemas: catalog
+    default-schema: catalog
+
+  # Taille max upload (Pour les images HD)
+  codec:
+    max-in-memory-size: 20MB
+
+# Configuration MinIO
+minio:
+  url: http://localhost:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: stilles-auto-images
+
+# Configuration JWT (DOIT ÊTRE LA MÊME CLÉ QUE AUTH-SERVICE)
+jwt:
+  secret: "my-super-secret-key-at-least-32-chars!!"
+
+logging:
+  level:
+    org.springframework: INFO
+    com.Team_Pk: DEBUG
