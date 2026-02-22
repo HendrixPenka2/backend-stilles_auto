@@ -1,6 +1,7 @@
 package com.Team_Pk.car_rental.catalog.service;
 
 
+import com.Team_Pk.car_rental.catalog.dto.ImageReorderRequest;
 import com.Team_Pk.car_rental.catalog.entity.VehicleImage;
 import com.Team_Pk.car_rental.catalog.repository.VehicleImageRepository;
 import com.Team_Pk.car_rental.catalog.repository.VehicleRepository;
@@ -20,6 +21,7 @@ public class VehicleImageService {
     private final VehicleImageRepository imageRepository;
     private final VehicleRepository vehicleRepository;
     private final MinioService minioService;
+    
 
     public Flux<VehicleImage> uploadImages(UUID vehicleId, Flux<FilePart> files) {
         return vehicleRepository.findById(vehicleId)
@@ -60,5 +62,29 @@ public class VehicleImageService {
                     minioService.deleteFile(img.getUrl())
                             .then(imageRepository.delete(img))
                 );
+    }
+
+    // ==========================================
+    // RÉORGANISER LES IMAGES
+    // ==========================================
+    public Mono<Void> reorderImages(UUID vehicleId, ImageReorderRequest request) {
+        // 1. On "éteint" le is_primary sur toutes les images pour éviter le conflit PostgreSQL
+        return imageRepository.resetPrimaryStatus(vehicleId)
+                .thenMany(
+                        // 2. On boucle sur la liste envoyée par le frontend
+                        Flux.fromIterable(request.getOrder())
+                                .flatMap(imgOrder -> {
+                                    // Celle qui a l'ordre 0 devient la nouvelle image principale !
+                                    boolean isPrimary = (imgOrder.getDisplayOrder() == 0);
+                                    
+                                    return imageRepository.updateImageOrderAndPrimary(
+                                            imgOrder.getImageId(),
+                                            vehicleId,
+                                            imgOrder.getDisplayOrder(),
+                                            isPrimary
+                                    );
+                                })
+                )
+                .then(); // On renvoie un Mono<Void> quand tout est fini
     }
 }

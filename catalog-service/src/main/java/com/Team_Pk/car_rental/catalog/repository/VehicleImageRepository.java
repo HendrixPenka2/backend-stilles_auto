@@ -17,4 +17,14 @@ public interface VehicleImageRepository extends ReactiveCrudRepository<VehicleIm
     
     // Trouver l'image principale d'un véhicule
     Mono<VehicleImage> findByVehicleIdAndIsPrimaryTrue(UUID vehicleId);
+
+    // 1. Remettre toutes les images du véhicule à is_primary = false
+    @org.springframework.data.r2dbc.repository.Modifying
+    @org.springframework.data.r2dbc.repository.Query("UPDATE catalog.vehicle_images SET is_primary = false WHERE vehicle_id = :vehicleId")
+    Mono<Integer> resetPrimaryStatus(UUID vehicleId);
+
+    // 2. Mettre à jour l'ordre et le statut d'une image spécifique
+    @org.springframework.data.r2dbc.repository.Modifying
+    @org.springframework.data.r2dbc.repository.Query("UPDATE catalog.vehicle_images SET display_order = :displayOrder, is_primary = :isPrimary WHERE id = :imageId AND vehicle_id = :vehicleId")
+    Mono<Integer> updateImageOrderAndPrimary(UUID imageId, UUID vehicleId, Integer displayOrder, Boolean isPrimary);
 }

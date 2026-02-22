@@ -1,5 +1,9 @@
 package com.Team_Pk.car_rental.catalog.controller;
 
+import com.Team_Pk.car_rental.catalog.dto.AvailabilityResponse;
+import com.Team_Pk.car_rental.catalog.dto.BlockPeriodRequest;
+import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
+import com.Team_Pk.car_rental.catalog.dto.ImageReorderRequest;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleDetailResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleRequest;
@@ -21,6 +25,7 @@ import org.springdoc.core.annotations.ParameterObject;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -44,6 +49,26 @@ public class VehicleController {
     public Mono<VehicleDetailResponse> getVehicleById(@PathVariable("id") UUID id) {
         return vehicleService.getVehicleById(id);
     }
+
+    // --- DANS LA SECTION ROUTES PUBLIQUES ---
+
+    @GetMapping("/vehicles/featured")
+    public Mono<List<Vehicle>> getFeaturedVehicles(@RequestParam(name = "limit", required = false) Integer limit) {
+        return vehicleService.getFeaturedVehicles(limit);
+    }
+
+    //recuperer toutes les options de filtres 
+    @GetMapping("/vehicles/filters/options")
+    public Mono<FilterOptionsResponse> getFilterOptions() {
+        return vehicleService.getFilterOptions();
+    }
+
+    // --- ROUTE PUBLIQUE (Pour le calendrier côté Front-end) ---
+    @GetMapping("/vehicles/{id}/availability")
+    public Flux<AvailabilityResponse> getAvailability(@PathVariable("id") UUID id) {
+        return vehicleService.getVehicleAvailability(id);
+    }
+
 
     // ==========================================
     // ROUTES ADMIN (Protégées par SecurityConfig)
@@ -72,6 +97,12 @@ public class VehicleController {
         return vehicleService.deleteVehicle(id);
     }
 
+    @PatchMapping("/admin/vehicles/{id}/reactivate")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<Vehicle> reactivateVehicle(@PathVariable("id") UUID id) {
+        return vehicleService.reactivateVehicle(id);
+    }
+
         // ==========================================
     // ROUTES IMAGES (ADMIN)
     // ==========================================
@@ -86,12 +117,44 @@ public class VehicleController {
         return vehicleImageService.uploadImages(id, files);
     }
 
+    // --- DANS LA SECTION ROUTES ADMIN ---
+
+    @GetMapping("/admin/vehicles")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<PaginatedResponse<Vehicle>> getAdminVehicles(@ParameterObject @ModelAttribute VehicleSearchCriteria criteria) {
+        return vehicleService.getAdminVehicles(criteria);
+    }
+
     @DeleteMapping("/admin/vehicles/{id}/images/{image_id}")
     @PreAuthorize("hasRole('ADMIN')")
     public Mono<Void> deleteVehicleImage(
             @PathVariable("id") UUID vehicleId,
             @PathVariable("image_id") UUID imageId) {
         return vehicleImageService.deleteImage(vehicleId, imageId);
+    }
+
+        // --- ROUTES ADMIN ---
+    @PostMapping("/admin/vehicles/{id}/availability/block")
+    @ResponseStatus(HttpStatus.CREATED)
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<UUID> blockPeriod(@PathVariable("id") UUID id, @RequestBody BlockPeriodRequest request) {
+        return vehicleService.blockVehiclePeriod(id, request);
+    }
+
+    @DeleteMapping("/admin/vehicles/{id}/availability/{block_id}")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<Void> unblockPeriod(
+            @PathVariable("id") UUID vehicleId, 
+            @PathVariable("block_id") UUID blockId) {
+        return vehicleService.unblockVehiclePeriod(vehicleId, blockId);
+    }
+
+    @PatchMapping("/admin/vehicles/{id}/images/reorder")
+    @PreAuthorize("hasRole('ADMIN')")
+    public Mono<Void> reorderVehicleImages(
+            @PathVariable("id") UUID vehicleId,
+            @RequestBody ImageReorderRequest request) {
+        return vehicleImageService.reorderImages(vehicleId, request);
     }
 
 }

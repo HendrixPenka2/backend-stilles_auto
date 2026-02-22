@@ -1,13 +1,18 @@
 package com.Team_Pk.car_rental.catalog.repository;
 
+import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleSearchCriteria;
 import com.Team_Pk.car_rental.catalog.entity.Vehicle;
+import com.Team_Pk.car_rental.catalog.entity.enums.FuelType;
+import com.Team_Pk.car_rental.catalog.entity.enums.TransmissionType;
+import com.Team_Pk.car_rental.catalog.entity.enums.VehicleType;
 import lombok.RequiredArgsConstructor;
 import org.springframework.r2dbc.core.DatabaseClient;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RequiredArgsConstructor
@@ -131,5 +136,76 @@ public class VehicleCustomRepositoryImpl implements VehicleCustomRepository {
             sql.append(" AND (title ILIKE :q OR brand ILIKE :q OR model ILIKE :q OR description ILIKE :q)");
             params.put("q", "%" + c.getQ() + "%");
         }
+    }
+
+    @Override
+    public Mono<FilterOptionsResponse> getFilterOptions() {
+        String sql = "SELECT " +
+                "MIN(year) as min_year, MAX(year) as max_year, " +
+                "MIN(sale_price) as min_sale_price, MAX(sale_price) as max_sale_price, " +
+                "MIN(rental_price_per_day) as min_rental_price, MAX(rental_price_per_day) as max_rental_price " +
+                "FROM catalog.vehicles WHERE is_active = true";
+
+        return databaseClient.sql(sql)
+                .map((row, rowMetadata) -> FilterOptionsResponse.builder()
+                        .vehicleTypes(List.of(VehicleType.values()))
+                        .fuelTypes(List.of(FuelType.values()))
+                        .transmissions(List.of(TransmissionType.values()))
+                        .year(FilterOptionsResponse.MinMax.builder()
+                                .min(row.get("min_year", Integer.class))
+                                .max(row.get("max_year", Integer.class))
+                                .build())
+                        .salePrice(FilterOptionsResponse.MinMax.builder()
+                                .min(row.get("min_sale_price", java.math.BigDecimal.class))
+                                .max(row.get("max_sale_price", java.math.BigDecimal.class))
+                                .build())
+                        .rentalPrice(FilterOptionsResponse.MinMax.builder()
+                                .min(row.get("min_rental_price", java.math.BigDecimal.class))
+                                .max(row.get("max_rental_price", java.math.BigDecimal.class))
+                                .build())
+                        .build()
+                ).one();
+    }
+
+    // ==========================================
+    // MÉTHODES ADMIN (incluent les véhicules inactifs)
+    // ==========================================
+
+    @Override
+    public Flux<Vehicle> findAllVehiclesByCriteria(VehicleSearchCriteria c) {
+        // ATTENTION : Pour l'admin, on ne filtre PAS sur is_active
+        StringBuilder sql = new StringBuilder("SELECT * FROM catalog.vehicles WHERE 1=1");
+        Map<String, Object> params = new HashMap<>();
+
+        buildConditions(sql, params, c);
+
+        // Pagination
+        sql.append(" ORDER BY created_at DESC ");
+        sql.append(" LIMIT :limit OFFSET :offset");
+        params.put("limit", c.getLimit());
+        params.put("offset", (c.getPage() - 1) * c.getLimit());
+
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql.toString());
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            spec = spec.bind(entry.getKey(), entry.getValue());
+        }
+
+        return spec.mapProperties(Vehicle.class).all();
+    }
+
+    @Override
+    public Mono<Long> countAllVehiclesByCriteria(VehicleSearchCriteria c) {
+        // ATTENTION : Pour l'admin, on ne filtre PAS sur is_active
+        StringBuilder sql = new StringBuilder("SELECT COUNT(*) FROM catalog.vehicles WHERE 1=1");
+        Map<String, Object> params = new HashMap<>();
+
+        buildConditions(sql, params, c);
+
+        DatabaseClient.GenericExecuteSpec spec = databaseClient.sql(sql.toString());
+        for (Map.Entry<String, Object> entry : params.entrySet()) {
+            spec = spec.bind(entry.getKey(), entry.getValue());
+        }
+
+        return spec.map((row, rowMetadata) -> row.get(0, Long.class)).one();
     }
 }

@@ -1,17 +1,23 @@
 package com.Team_Pk.car_rental.catalog.service;
 
 
+import com.Team_Pk.car_rental.catalog.dto.AvailabilityResponse;
+import com.Team_Pk.car_rental.catalog.dto.BlockPeriodRequest;
+import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleDetailResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleSearchCriteria;
 import com.Team_Pk.car_rental.catalog.entity.Vehicle;
 import com.Team_Pk.car_rental.catalog.entity.VehicleImage;
 import com.Team_Pk.car_rental.catalog.entity.enums.VehicleStatus;
+import com.Team_Pk.car_rental.catalog.repository.RentalAvailabilityRepository;
 import com.Team_Pk.car_rental.catalog.repository.VehicleImageRepository;
 import com.Team_Pk.car_rental.catalog.repository.VehicleRepository;
 import com.Team_Pk.car_rental.catalog.dto.VehicleRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+
+import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.time.Instant;
@@ -24,6 +30,7 @@ public class VehicleService {
 
     private final VehicleRepository vehicleRepository;
     private final VehicleImageRepository imageRepository;
+    private final RentalAvailabilityRepository availabilityRepository;
     
 
     // ==========================================
@@ -76,6 +83,26 @@ public class VehicleService {
                         .build()
         );
     }
+    // ==========================================
+    // NOUVELLES MÉTHODES PUBLIQUES
+    // ==========================================
+
+    // 1. Les véhicules en vedette (Featured)
+    public Mono<List<Vehicle>> getFeaturedVehicles(Integer limit) {
+        VehicleSearchCriteria criteria = new VehicleSearchCriteria();
+        criteria.setIsFeatured(true);
+        criteria.setPage(1);
+        criteria.setLimit(limit != null ? limit : 6); // 6 par défaut pour le carrousel
+
+        // On réutilise notre méthode searchVehicles !
+        return vehicleRepository.findVehiclesByCriteria(criteria).collectList();
+    }
+
+    // 2. Les options de filtres dynamiques pour le front (ex: toutes les marques, tous les modèles, etc.)
+    public Mono<FilterOptionsResponse> getFilterOptions() {
+        return vehicleRepository.getFilterOptions();
+    }
+
 
     // ==========================================
     // MÉTHODES ADMIN
@@ -161,5 +188,77 @@ public class VehicleService {
                 })
                 .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")))
                 .then();
+    }
+
+    // ==========================================
+    // NOUVELLES MÉTHODES ADMIN
+    // ==========================================
+
+    // 3. Liste Admin (inclut les véhicules inactifs + permet la recherche par mot-clé)
+    public Mono<PaginatedResponse<Vehicle>> getAdminVehicles(VehicleSearchCriteria criteria) {
+        // Pour l'admin, on veut voir TOUS les véhicules (actifs ET inactifs)
+        // mais avec la possibilité de faire des recherches par mot-clé
+        Mono<List<Vehicle>> dataMono = vehicleRepository.findAllVehiclesByCriteria(criteria).collectList();
+        Mono<Long> countMono = vehicleRepository.countAllVehiclesByCriteria(criteria);
+
+        return Mono.zip(dataMono, countMono).map(tuple -> {
+            List<Vehicle> data = tuple.getT1();
+            long total = tuple.getT2();
+            int totalPages = (int) Math.ceil((double) total / criteria.getLimit());
+
+            PaginatedResponse.Meta meta = PaginatedResponse.Meta.builder()
+                    .total(total)
+                    .page(criteria.getPage())
+                    .limit(criteria.getLimit())
+                    .totalPages(totalPages)
+                    .hasNext(criteria.getPage() < totalPages)
+                    .hasPrev(criteria.getPage() > 1)
+                    .build();
+
+            return PaginatedResponse.<Vehicle>builder()
+                    .data(data)
+                    .meta(meta)
+                    .build();
+        });
+    }
+
+    // 4. Réactiver un véhicule désactivé
+    public Mono<Vehicle> reactivateVehicle(UUID id) {
+        return vehicleRepository.findById(id)
+                .flatMap(vehicle -> {
+                    if (vehicle.getIsActive()) {
+                        return Mono.error(new RuntimeException("Ce véhicule est déjà actif"));
+                    }
+                    vehicle.setIsActive(true);
+                    vehicle.setUpdatedAt(Instant.now());
+                    return vehicleRepository.save(vehicle);
+                })
+                .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")));
+    }
+
+    // ==========================================
+    // DISPONIBILITÉS (CALENDRIER)
+    // ==========================================
+
+    // PUBLIC : Voir les dates bloquées
+    public Flux<AvailabilityResponse> getVehicleAvailability(UUID vehicleId) {
+        return availabilityRepository.getFutureAvailability(vehicleId);
+    }
+
+    // ADMIN : Bloquer manuellement (ex: La voiture va au garage)
+    public Mono<UUID> blockVehiclePeriod(UUID vehicleId, BlockPeriodRequest req) {
+        if (req.getStartDate().isAfter(req.getEndDate())) {
+            return Mono.error(new RuntimeException("La date de début doit être avant la date de fin"));
+        }
+        
+        // On intercepte l'erreur GIST de PostgreSQL (Double booking)
+        return availabilityRepository.blockPeriod(
+                vehicleId, req.getStartDate(), req.getEndDate(), req.getReason(), req.getNotes()
+        ).onErrorMap(e -> new RuntimeException("Conflit de dates : Ce véhicule est déjà indisponible sur cette période !"));
+    }
+
+    // ADMIN : Débloquer
+    public Mono<Void> unblockVehiclePeriod(UUID vehicleId, UUID blockId) {
+        return availabilityRepository.deleteBlock(blockId, vehicleId);
     }
 }
