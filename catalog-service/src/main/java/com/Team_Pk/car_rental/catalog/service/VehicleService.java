@@ -5,12 +5,15 @@ import com.Team_Pk.car_rental.catalog.dto.AvailabilityResponse;
 import com.Team_Pk.car_rental.catalog.dto.BlockPeriodRequest;
 import com.Team_Pk.car_rental.catalog.dto.FilterOptionsResponse;
 import com.Team_Pk.car_rental.catalog.dto.PaginatedResponse;
+import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentRequest;
+import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleCalendarResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleDetailResponse;
 import com.Team_Pk.car_rental.catalog.dto.VehicleSearchCriteria;
 import com.Team_Pk.car_rental.catalog.entity.StockMovement;
 import com.Team_Pk.car_rental.catalog.entity.Vehicle;
 import com.Team_Pk.car_rental.catalog.entity.VehicleImage;
+import com.Team_Pk.car_rental.catalog.entity.enums.StockMovementReason;
 import com.Team_Pk.car_rental.catalog.entity.enums.VehicleStatus;
 import com.Team_Pk.car_rental.catalog.repository.RentalAvailabilityRepository;
 import com.Team_Pk.car_rental.catalog.repository.StockMovementRepository;
@@ -19,6 +22,7 @@ import com.Team_Pk.car_rental.catalog.repository.VehicleRepository;
 import com.Team_Pk.car_rental.catalog.dto.VehicleRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -113,11 +117,16 @@ public class VehicleService {
     // MÉTHODES ADMIN
     // ==========================================
 
+    // ==============================================================
+    // 1. CRÉATION AVEC STOCK INITIAL (INITIAL_STOCK)
+    // ==============================================================
+    @Transactional
     public Mono<Vehicle> createVehicle(VehicleRequest req, UUID adminId) {
-        // Optionnel : vérifier si le VIN existe déjà
         return vehicleRepository.existsByVin(req.getVin())
                 .flatMap(exists -> {
                     if (exists) return Mono.error(new RuntimeException("Ce VIN existe déjà."));
+
+                    int initialStock = req.getStockQuantity() != null ? req.getStockQuantity() : 1;
 
                     Vehicle vehicle = Vehicle.builder()
                             .title(req.getTitle())
@@ -137,16 +146,33 @@ public class VehicleService {
                             .listingMode(req.getListingMode())
                             .salePrice(req.getSalePrice())
                             .rentalPricePerDay(req.getRentalPricePerDay())
-                            .stockQuantity(req.getStockQuantity() != null ? req.getStockQuantity() : 1)
+                            .stockQuantity(initialStock) // On set le stock initial
                             .status(req.getStatus() != null ? req.getStatus() : VehicleStatus.AVAILABLE)
                             .description(req.getDescription())
                             .features(req.getFeatures())
                             .isFeatured(req.getIsFeatured() != null ? req.getIsFeatured() : false)
                             .isActive(true)
-                            .createdBy(adminId) // L'ID du token JWT de l'admin
+                            .createdBy(adminId)
                             .build();
 
-                    return vehicleRepository.save(vehicle);
+                    return vehicleRepository.save(vehicle)
+                            .flatMap(savedVehicle -> {
+                                // CRÉATION DU MOUVEMENT DE STOCK INITIAL
+                                StockMovement movement = StockMovement.builder()
+                                        .entityType("VEHICLE")
+                                        .entityId(savedVehicle.getId())
+                                        .quantityDelta(initialStock) // +1, +5, etc.
+                                        .quantityBefore(0)
+                                        .quantityAfter(initialStock)
+                                        .reason(StockMovementReason.INITIAL_STOCK)
+                                        .notes("Création initiale du véhicule")
+                                        .performedBy(adminId)
+                                        .createdAt(Instant.now())
+                                        .build();
+
+                                // On sauvegarde le mouvement, puis on retourne le véhicule
+                                return stockMovementRepository.save(movement).thenReturn(savedVehicle);
+                            });
                 });
     }
 
@@ -183,13 +209,85 @@ public class VehicleService {
                 .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")));
     }
 
-    public Mono<Void> deleteVehicle(UUID id) {
+        // ==============================================================
+    // 2. AJUSTEMENT MANUEL DU STOCK (PATCH /stock)
+    // ==============================================================
+    @Transactional
+    public Mono<StockAdjustmentResponse> adjustVehicleStock(UUID id, StockAdjustmentRequest req, UUID adminId) {
+        return vehicleRepository.findById(id)
+                .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")))
+                .flatMap(vehicle -> {
+                    int oldQty = vehicle.getStockQuantity();
+                    int newQty = oldQty + req.getQuantityDelta();
+
+                    if (newQty < 0) {
+                        return Mono.error(new RuntimeException("Le stock ne peut pas être négatif"));
+                    }
+
+                    // Mise à jour du véhicule
+                    vehicle.setStockQuantity(newQty);
+                    vehicle.setUpdatedAt(Instant.now());
+
+                    return vehicleRepository.save(vehicle)
+                            .flatMap(savedVehicle -> {
+                                // CRÉATION DU MOUVEMENT D'AJUSTEMENT
+                                StockMovement movement = StockMovement.builder()
+                                        .entityType("VEHICLE")
+                                        .entityId(savedVehicle.getId())
+                                        .quantityDelta(req.getQuantityDelta())
+                                        .quantityBefore(oldQty)
+                                        .quantityAfter(newQty)
+                                        .reason(req.getReason()) // PURCHASE_IN, LOSS, ADJUSTMENT...
+                                        .notes(req.getNotes())
+                                        .performedBy(adminId)
+                                        .createdAt(Instant.now())
+                                        .build();
+
+                                return stockMovementRepository.save(movement)
+                                        .map(savedMov -> StockAdjustmentResponse.builder()
+                                                .entityId(savedVehicle.getId()) // ID générique (nom du champ DTO peut varier)
+                                                .quantityBefore(oldQty)
+                                                .quantityAfter(newQty)
+                                                .movementId(savedMov.getId())
+                                                .build());
+                            });
+                });
+    }
+
+    // ==============================================================
+    // 3. SUPPRESSION / DÉSACTIVATION (ADJUSTMENT - Sortie totale)
+    // ==============================================================
+    @Transactional
+    public Mono<Void> deleteVehicle(UUID id, UUID adminId) {
         return vehicleRepository.findById(id)
                 .flatMap(vehicle -> {
-                    // Suppression douce (Soft Delete)
+                    int currentStock = vehicle.getStockQuantity();
+                    
+                    // On désactive le véhicule
                     vehicle.setIsActive(false);
+                    // On remet le stock à 0 pour qu'il ne soit plus compté
+                    vehicle.setStockQuantity(0);
                     vehicle.setUpdatedAt(Instant.now());
-                    return vehicleRepository.save(vehicle);
+
+                    return vehicleRepository.save(vehicle)
+                            .flatMap(saved -> {
+                                // Si on avait du stock, on enregistre qu'on l'a retiré
+                                if (currentStock > 0) {
+                                    StockMovement movement = StockMovement.builder()
+                                            .entityType("VEHICLE")
+                                            .entityId(saved.getId())
+                                            .quantityDelta(-currentStock) // On retire tout (-X)
+                                            .quantityBefore(currentStock)
+                                            .quantityAfter(0)
+                                            .reason(StockMovementReason.ADJUSTMENT)
+                                            .notes("Désactivation du véhicule (Sortie de stock)")
+                                            .performedBy(adminId)
+                                            .createdAt(Instant.now())
+                                            .build();
+                                    return stockMovementRepository.save(movement);
+                                }
+                                return Mono.empty();
+                            });
                 })
                 .switchIfEmpty(Mono.error(new RuntimeException("Véhicule introuvable")))
                 .then();

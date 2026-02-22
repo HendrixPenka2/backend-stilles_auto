@@ -1,45 +1,36 @@
-package com.Team_Pk.car_rental.catalog.entity;
+package com.Team_Pk.car_rental.catalog.dto;
 
-import lombok.*;
-import org.springframework.data.annotation.*;
-import org.springframework.data.relational.core.mapping.Table;
+//(Pour Création/Modif Admin)
+import lombok.Data;
+import java.math.BigDecimal;
 
 import com.Team_Pk.car_rental.catalog.entity.enums.AccessoryCondition;
 
-import java.math.BigDecimal;
-import java.time.Instant;
-import java.util.UUID;
-
 @Data
-@Builder
-@NoArgsConstructor
-@AllArgsConstructor
-@Table(name = "accessories", schema = "catalog")
-public class Accessory {
-    @Id
-    private UUID id;
+public class AccessoryRequest {
     private String name;
     private String brand;
     private String sku;
     private String category;
     private String subCategory;
+    
+    // Tableaux de chaînes pour la compatibilité
     private String[] compatibleBrands;
     private String[] compatibleModels;
+    
     private BigDecimal price;
     private BigDecimal comparePrice;
     private Integer stockQuantity;
     private Integer lowStockAlert;
-    private AccessoryCondition condition;
+    
+    private AccessoryCondition condition; // NEW, LIKE_NEW...
     private BigDecimal weightKg;
+    
+    // JSON stockés en String
     private String dimensions;
     private String description;
     private String specifications;
+    
     private Boolean isFeatured;
     private Boolean isActive;
-    private UUID createdBy;
-    
-    @CreatedDate
-    private Instant createdAt;
-    @LastModifiedDate
-    private Instant updatedAt;
 }

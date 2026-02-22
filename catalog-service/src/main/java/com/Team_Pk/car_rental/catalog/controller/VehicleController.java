@@ -94,11 +94,11 @@ public class VehicleController {
         return vehicleService.updateVehicle(id, request);
     }
 
-    @DeleteMapping("/admin/vehicles/{id}")
+@DeleteMapping("/admin/vehicles/{id}")
     @PreAuthorize("hasRole('ADMIN')")
-    // CORRECTION 2 : Préciser ("id") dans le PathVariable
-    public Mono<Void> deleteVehicle(@PathVariable("id") UUID id) {
-        return vehicleService.deleteVehicle(id);
+    public Mono<Void> deleteVehicle(@PathVariable("id") UUID id, Authentication auth) {
+        UUID adminId = UUID.fromString(auth.getName());
+        return vehicleService.deleteVehicle(id, adminId); // On passe l'adminId
     }
 
     @PatchMapping("/admin/vehicles/{id}/reactivate")
