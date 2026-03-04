@@ -5,6 +5,7 @@ import com.Team_Pk.car_rental.auth.dto.LoginRequest;
 import com.Team_Pk.car_rental.auth.dto.RegisterRequest;
 import com.Team_Pk.car_rental.auth.dto.ResetPasswordRequest;
 import com.Team_Pk.car_rental.auth.dto.UpdateProfileRequest;
+import com.Team_Pk.car_rental.auth.dto.UserEvent;
 import com.Team_Pk.car_rental.auth.entity.EmailVerificationToken;
 import com.Team_Pk.car_rental.auth.entity.PasswordResetToken;
 import com.Team_Pk.car_rental.auth.entity.RefreshToken;
@@ -14,6 +15,8 @@ import com.Team_Pk.car_rental.auth.repository.EmailVerificationTokenRepository;
 import com.Team_Pk.car_rental.auth.repository.PasswordResetTokenRepository;
 import com.Team_Pk.car_rental.auth.repository.RefreshTokenRepository;
 import com.Team_Pk.car_rental.auth.repository.UserRepository;
+import com.Team_Pk.car_rental.config.RabbitMQConfig;
+
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.RequiredArgsConstructor;
@@ -23,6 +26,7 @@ import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -44,6 +48,7 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokenRepository;
     private final JavaMailSender mailSender;
     private final PasswordResetTokenRepository resetTokenRepository;
+    private final RabbitTemplate rabbitTemplate;
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
     @Value("${jwt.secret}")
@@ -110,11 +115,23 @@ public class AuthService {
                             .flatMap(user -> {
                                 user.setEmailVerified(true);
                                 return userRepository.save(user)
-                                        .then(tokenRepository.deleteByUserId(userId))
-                                        .thenReturn(user);
+                                        .flatMap(savedUser -> {
+                                            // 🔥 ENVOI DE L'ÉVÉNEMENT POUR LE MAIL DE BIENVENUE
+                                            UserEvent event = UserEvent.builder()
+                                                    .userId(savedUser.getId())
+                                                    .email(savedUser.getEmail())
+                                                    .firstName(savedUser.getFirstName())
+                                                    .action("VERIFIED")
+                                                    .build();
+                                            rabbitTemplate.convertAndSend(RabbitMQConfig.EXCHANGE_NAME, RabbitMQConfig.USER_VERIFIED_KEY, event);
+                                            log.info("📤 Événement USER_VERIFIED envoyé pour user: {} ({})", savedUser.getId(), savedUser.getEmail());
+                                        
+                                            return tokenRepository.deleteByUserId(userId).thenReturn(savedUser);
+                                        
                             });
                 })
                 .switchIfEmpty(Mono.error(new RuntimeException("Code invalide")));
+    });
     }
 
     public Mono<JwtResponse> login(LoginRequest request) {
@@ -256,8 +273,20 @@ public class AuthService {
                                 user.setPasswordHash(passwordEncoder.encode(request.getNewPassword()));
                                 user.setUpdatedAt(Instant.now());
                                 return userRepository.save(user)
-                                        .then(refreshTokenRepository.deleteByUserId(user.getId()))
-                                        .then(resetTokenRepository.delete(token))
+                                        .flatMap(savedUser -> {
+                                            // 🔥 ENVOI DE L'ÉVÉNEMENT DE SÉCURITÉ
+                                            UserEvent event = UserEvent.builder()
+                                                    .userId(savedUser.getId())
+                                                    .email(savedUser.getEmail())
+                                                    .firstName(savedUser.getFirstName())
+                                                    .action("PASSWORD_CHANGED")
+                                                    .build();
+                                            rabbitTemplate.convertAndSend(RabbitMQConfig.EXCHANGE_NAME, RabbitMQConfig.PASSWORD_CHANGED_KEY, event);
+                                            log.info("📤 Événement PASSWORD_CHANGED envoyé pour user: {}", savedUser.getId());
+                                            
+                                            return refreshTokenRepository.deleteByUserId(user.getId())
+                                                    .then(resetTokenRepository.delete(token));
+                                        })
                                         .doOnSuccess(v -> log.info("✅ Mot de passe réinitialisé avec succès"));
                             });
                 })

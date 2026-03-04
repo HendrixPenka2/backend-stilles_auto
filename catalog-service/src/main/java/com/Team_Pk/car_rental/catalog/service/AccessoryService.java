@@ -13,6 +13,7 @@ import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentRequest;
 import com.Team_Pk.car_rental.catalog.dto.StockAdjustmentResponse;
 import com.Team_Pk.car_rental.catalog.dto.StockHistoryListResponse;
 import com.Team_Pk.car_rental.catalog.entity.Accessory;
+import com.Team_Pk.car_rental.catalog.entity.AccessoryImage;
 import com.Team_Pk.car_rental.catalog.entity.StockMovement;
 import com.Team_Pk.car_rental.catalog.entity.enums.StockMovementReason;
 import com.Team_Pk.car_rental.catalog.repository.AccessoryImageRepository;
@@ -33,6 +34,9 @@ public class AccessoryService {
     private final StockMovementRepository stockMovementRepository;
     private final AccessoryImageRepository imageRepository;
 
+    // NOUVEAU : On injecte notre client HTTP
+    private final CommunityWebClient communityWebClient;
+
     // --- PUBLIC ---
     public Mono<PaginatedResponse<Accessory>> searchAccessories(AccessorySearchCriteria c) {
         return Mono.zip(
@@ -50,14 +54,25 @@ public class AccessoryService {
     }
 
     public Mono<AccessoryDetailResponse> getAccessoryById(UUID id) {
-        return accessoryRepository.findById(id)
+        Mono<Accessory> accessoryMono = accessoryRepository.findById(id)
                 .filter(Accessory::getIsActive)
-                .switchIfEmpty(Mono.error(new RuntimeException("Accessoire introuvable")))
-                .zipWith(imageRepository.findByAccessoryIdOrderByDisplayOrderAsc(id).collectList())
-                .map(tuple -> AccessoryDetailResponse.builder()
+                .switchIfEmpty(Mono.error(new RuntimeException("Accessoire introuvable")));
+
+        Mono<List<AccessoryImage>> imagesMono = imageRepository
+                .findByAccessoryIdOrderByDisplayOrderAsc(id).collectList();
+
+        // Appel au Community-Service pour récupérer la vraie note moyenne et le nombre d'avis
+        Mono<CommunityWebClient.RatingDto> ratingMono = communityWebClient.getEntityRating("ACCESSORY", id);
+
+        // On combine les 3 sources de données en parallèle (Pattern BFF optimisé)
+        return Mono.zip(accessoryMono, imagesMono, ratingMono).map(tuple ->
+                AccessoryDetailResponse.builder()
                         .accessory(tuple.getT1())
                         .images(tuple.getT2())
-                        .averageRating(0.0).reviewCount(0).build());
+                        .averageRating(tuple.getT3().getAverageRating()) // Vraie donnée depuis Community
+                        .reviewCount(tuple.getT3().getReviewCount())     // Vraie donnée depuis Community
+                        .build()
+        );
     }
 
     public Mono<AccessoryFilterOptions> getFilterOptions() {

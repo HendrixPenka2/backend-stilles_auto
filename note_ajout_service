@@ -1,0 +1,9 @@
+Le bon groupId à utiliser pour vos futurs services est : com.Team_Pk.car_rental
+
+Explication des paramètres à remplir :
+Pour garder une arborescence cohérente avec vos services existants (comme catalog-service), voici ce qu'il faudra indiquer lors de la création d'un nouveau service (par exemple via Spring Initializr) :
+
+Group : com.Team_Pk.car_rental
+Artifact : nom-du-service (ex: payment-service)
+Package name : com.Team_Pk.car_rental.nom_du_service (ex: com.Team_Pk.car_rental.payment)
+En utilisant ces paramètres, Spring va créer les bons dossiers (ex: src/main/java/com/Team_Pk/car_rental/payment) dès le départ. Le nom du package déclaré dans vos classes correspondra exactement à l'arborescence physique des fichiers, ce qui évitera l'erreur de compilation liée aux packages introuvables.

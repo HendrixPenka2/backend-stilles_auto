@@ -25,6 +25,13 @@ spring:
   codec:
     max-in-memory-size: 20MB
 
+  # Configuration RabbitMQ (Écoute des événements de community-service)
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
 # Configuration MinIO
 minio:
   url: http://localhost:9000
@@ -35,6 +42,10 @@ minio:
 # Configuration JWT (DOIT ÊTRE LA MÊME CLÉ QUE AUTH-SERVICE)
 jwt:
   secret: "my-super-secret-key-at-least-32-chars!!"
+
+# URL du service Community (Pour récupérer les reviews et ratings)
+community-service:
+  url: http://localhost:8083/api/v1
 
 logging:
   level:
